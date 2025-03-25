@@ -17,7 +17,7 @@ While the existing DebugView has fitlers - I don't want to be clicking around an
 
 ## Usage
 
-### Instalation
+### Installation
 
 ```PowerShell
 git clone https://github.com/umutguler/ms-iis-debugview-wrapper
