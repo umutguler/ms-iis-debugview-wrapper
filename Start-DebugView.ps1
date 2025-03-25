@@ -47,7 +47,6 @@ $InstallDir = "$env:APPDATA\DebugView"
 $DebugView64Exe = "$InstallDir\dbgview64.exe"
 $DebugView64Args = "/accepteula /t /g /o /f /l $LogFilePath"
 
-
 ## Functions ##
 function Install-DebugView {
     param (
@@ -62,7 +61,6 @@ function Install-DebugView {
     }
     $ZipUrl = "https://download.sysinternals.com/files/DebugView.zip"
     $ZipPath = "$env:TEMP\DebugView.zip"
-
     Write-Host "Downloading DebugView..."
     Invoke-WebRequest -Uri $ZipUrl -OutFile $ZipPath
     Write-Host "Extracting DebugView to $installDir..."
@@ -86,14 +84,19 @@ function Uninstall-DebugView {
         Write-Host "DebugView is not installed at $installDir."
         exit 0
     }
+
     Write-Host "Removing DebugView from $installDir..."
     Remove-Item -Path $installDir -Recurse -Force
+
     $envPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
     if ($envPath -like "*$installDir*") {
         Write-Host "Removing $installDir from the user's PATH..."
         $newPath = ($envPath -split ';' | Where-Object { $_ -ne $installDir }) -join ';'
         [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::User)
     }
+
+    Remove-ResidualItems
+
     Write-Host "DebugView uninstalled successfully."
 }
 
@@ -115,7 +118,7 @@ function Assert-IsInstalled {
 function Stop-ExistingProcesses {
     $existing = Get-Process -Name "dbgview64" -ErrorAction SilentlyContinue
     if ($existing) {
-        Write-Host "Stopping existing DebugView instances..."
+        Write-Host "Stopping existing DebugView instances."
         $existing | Stop-Process -Force
         Start-Sleep -Milliseconds 500
     }
@@ -123,9 +126,23 @@ function Stop-ExistingProcesses {
 
 function Remove-LogFiles {
     if (Test-Path $LogFilePath) {
-        Write-Host "Removing existing log file..."
+        Write-Host "Removing log file."
         Remove-Item -Path $LogFilePath -Force
     }
+}
+
+function Remove-RegistrySettings {
+    $regPath = "HKCU:\Software\Sysinternals\DbgView"
+    if (Test-Path $regPath) {
+        Write-Host "Clearing DebugView registry settings."
+        Remove-Item -Path $regPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Remove-ResidualItems {
+    Stop-ExistingProcesses
+    Remove-LogFiles
+    Remove-RegistrySettings
 }
 
 function Get-PidRegex {
@@ -145,7 +162,7 @@ function Get-PidRegex {
 }
 
 function Start-DebugViewAndTail {
-    Write-Host "Starting DebugView in the background..."
+    # Write-Host "Starting DebugView in the background..."
     $debugProcess = Start-Process -FilePath $DebugView64Exe -ArgumentList $DebugView64Args -PassThru -NoNewWindow
     Start-Sleep -Milliseconds 500
 
@@ -155,7 +172,7 @@ function Start-DebugViewAndTail {
         exit 1
     }
 
-    Write-Host "Starting detached log tailing..."
+    # Write-Host "Starting detached log tailing..."
 
     $processNamesToFilter = @()
     if ($FilterProfile -and $global:ProfileTargets.ContainsKey($FilterProfile)) {
@@ -187,7 +204,6 @@ function Start-DebugViewAndTail {
     }
 
     $tailProcess = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -Command `"$tailCommand`"" -PassThru -NoNewWindow
-    Write-Host "Tail PID: $($tailProcess.Id)"
 
     try {
         $tailProcess.WaitForExit()
@@ -196,13 +212,12 @@ function Start-DebugViewAndTail {
         Write-Host "Shutting down..."
         if (-not $tailProcess.HasExited) { $tailProcess.Kill(); Start-Sleep -Milliseconds 500 }
         if (-not $debugProcess.HasExited) { $debugProcess.Kill(); Start-Sleep -Milliseconds 500 }
-        Remove-LogFiles
-        Write-Host "Cleanup complete."
+        Remove-ResidualItems
     }
 }
 
 ## Main Script ##
-## Parameter Validaitons ##
+## Parameter Validations ##
 if ($Install -and $Uninstall) {
     Write-Error "Cannot specify both -Install and -Uninstall."
     exit 1
@@ -210,22 +225,20 @@ if ($Install -and $Uninstall) {
 
 $otherParamsUsed = ($Filter -ne "") -or ($ProcessName.Count -gt 0) -or ($FilterProfile -ne "")
 if (($Install -or $Uninstall) -and $otherParamsUsed) {
-    f
     Write-Error "The -Install and -Uninstall cannot be used with other parameters."
     exit 1
 }
 
 if ($Install) {
-    Install-DebugView($InstallDir)
+    Install-DebugView -installDir $InstallDir
     exit 0
 }
 elseif ($Uninstall) {
-    Uninstall-DebugView($InstallDir)
+    Uninstall-DebugView -installDir $InstallDir
     exit 0
 }
 
 Assert-IsAdmin
 Assert-IsInstalled
-Stop-ExistingProcesses
-Remove-LogFiles
+Remove-ResidualItems
 Start-DebugViewAndTail
